@@ -189,10 +189,6 @@ export default class VueJumper implements vscode.DefinitionProvider {
     position: vscode.Position
   ): vscode.ProviderResult<vscode.Definition | vscode.DefinitionLink[]> {
     return this.findImportFromPath(document, position).then((res) => {
-      console.log(
-        "🚀 ~ file: vueJumper.ts:188 ~ VueJumper ~ returnthis.findImportFromPath ~ res:",
-        res
-      );
       let allPaths: vscode.Location[] = [];
       if (res) {
         allPaths.push(
