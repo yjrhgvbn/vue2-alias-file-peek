@@ -26,7 +26,38 @@ export default class VueJumper implements vscode.DefinitionProvider {
 
   getSelectionWord(document: vscode.TextDocument, position: vscode.Position) {
     const selection = document.getWordRangeAtPosition(position);
+    if (!selection) {
+      return null;
+    }
     const selectionWord = document.getText(selection);
+    // 判断是不是template内
+    let templateStartLine = 0;
+    let templateEndLine = 0;
+    const documentTextLines = document.getText().split("\n");
+    for (let i = 0; i < documentTextLines.length; i++) {
+      if (documentTextLines[i].trim().startsWith("<template>")) {
+        templateStartLine = i;
+      }
+    }
+    for (let i = documentTextLines.length - 1; i >= 0; i--) {
+      if (documentTextLines[i].includes("</template>")) {
+        templateEndLine = i;
+      }
+    }
+    // 检查选中左边的是不是<
+    const leftChar = document.getText(
+      new vscode.Range(
+        new vscode.Position(
+          selection.start.line,
+          selection.start.character - 1
+        ),
+        selection.start
+      )
+    );
+    if (leftChar !== "<") {
+      return null;
+    }
+
     // 横杆转驼峰
     let word = selectionWord.replace(/-(\w)/g, function (all, letter) {
       return letter.toUpperCase();
@@ -137,6 +168,9 @@ export default class VueJumper implements vscode.DefinitionProvider {
   ) {
     document.uri;
     const word = this.getSelectionWord(document, position);
+    if (!word) {
+      return "";
+    }
     const importModule = await this.getImportModule(document, word);
     // 有.vue后缀的，vscode可以自动跳转
     if (!importModule || importModule.value.endsWith(".vue")) {
