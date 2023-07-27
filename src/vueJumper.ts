@@ -1,11 +1,15 @@
 import * as vscode from "vscode";
-import parseImports from "parse-imports";
-import { loadConfig, createMatchPath } from "tsconfig-paths";
+import parseImports, { ModuleSpecifierType } from "parse-imports";
+import { createMatchPath } from "tsconfig-paths";
 import { accessSync, constants } from "fs";
+import { resolve, relative } from "path";
 
 function checkFileExists(filePath: string) {
   try {
-    accessSync(filePath, constants.F_OK);
+    accessSync(
+      vscode.workspace.workspaceFolders![0].uri.fsPath + filePath,
+      constants.F_OK
+    );
     return true;
   } catch (err) {
     return false;
@@ -16,101 +20,136 @@ export interface IAliasConfigsItem {
   target: string[];
 }
 
-export interface ILineInfo {
-  type: string;
-  path: string;
-  originPath: string;
-}
-
-// const aliasConfigs: IAliasConfigsItem[] = [
-//   {
-//     alias: "@",
-//     target: "src",
-//   },
-// ];
-
 export default class VueJumper implements vscode.DefinitionProvider {
   aliasConfigs: IAliasConfigsItem[] = [];
-  globalComponentsPrefixConfigs: string[] = [];
   constructor() {}
+
+  getSelectionWord(document: vscode.TextDocument, position: vscode.Position) {
+    const selection = document.getWordRangeAtPosition(position);
+    const selectionWord = document.getText(selection);
+    // 横杆转驼峰
+    let word = selectionWord.replace(/-(\w)/g, function (all, letter) {
+      return letter.toUpperCase();
+    });
+    // 第一字母大写
+    word = word.slice(0, 1).toUpperCase() + word.slice(1);
+    return word;
+  }
+
+  async getImportModule(document: vscode.TextDocument, word: string) {
+    // 获取script标签的内容
+    const scriptContent = document
+      .getText()
+      .match(/<script>([\s\S]*)<\/script>/)?.[1];
+    if (!scriptContent) {
+      return;
+    }
+    const imports = [...(await parseImports(scriptContent))];
+    for (const item of imports) {
+      const { importClause, moduleSpecifier } = item;
+      // 有一个和当前名字相同的，就可以跳转
+      const hasSameName =
+        importClause?.default === word ||
+        importClause?.named.some((i) => {
+          return i.specifier === word || i.binding === word;
+        });
+      if (hasSameName) {
+        return {
+          type: moduleSpecifier.type,
+          value: moduleSpecifier.value || moduleSpecifier.code,
+        };
+      }
+    }
+  }
+
+  async getAliasConfig(name: string) {
+    const workspacePath = vscode.workspace.workspaceFolders?.[0].uri.path;
+    if (!workspacePath) {
+      return null;
+    }
+    const configPath = workspacePath + name;
+
+    const config = await vscode.workspace
+      .openTextDocument(configPath)
+      .then((document) => JSON.parse(document.getText()));
+    const baseUrl = config?.compilerOptions?.baseUrl;
+    const paths = config?.compilerOptions?.paths;
+    return { baseUrl, paths };
+  }
+
+  async getMatchPath(
+    document: vscode.TextDocument,
+    importModule: {
+      type: ModuleSpecifierType;
+      value: string;
+    }
+  ) {
+    if (importModule.type === "package") {
+      const importFilePath = importModule.value;
+      const tsconfig = await this.getAliasConfig("/tsconfig.json");
+      const jsconfig = await this.getAliasConfig("/jsconfig.json");
+      const baseUrl = tsconfig?.baseUrl || jsconfig?.baseUrl || ".";
+      const paths = tsconfig?.paths || jsconfig?.paths || {};
+      let matchPath = "";
+      const getMatchPath = createMatchPath(baseUrl, paths, undefined, false);
+      getMatchPath(
+        importFilePath,
+        undefined,
+        (importPath) => {
+          if (!importPath?.endsWith(".vue") || !checkFileExists(importPath)) {
+            return false;
+          }
+          matchPath = importPath;
+          return true;
+        },
+        [".vue"]
+      );
+      return matchPath;
+    } else if (
+      importModule.type === "relative" ||
+      importModule.type === "absolute"
+    ) {
+      let importFilePath = importModule.value;
+      if (importModule.type === "relative") {
+        const currentFilePath = document.uri.path;
+        importFilePath =
+          "/" +
+          relative(
+            vscode.workspace.workspaceFolders![0].uri.fsPath,
+            resolve(currentFilePath, "../", importModule.value)
+          );
+      }
+      if (checkFileExists(importFilePath + ".vue")) {
+        return importFilePath + ".vue";
+      }
+      if (checkFileExists(importFilePath + "/index.vue")) {
+        return importFilePath + "/index.vue";
+      }
+      return null;
+    } else {
+      return null;
+    }
+  }
 
   async findImportFromPath(
     document: vscode.TextDocument,
     position: vscode.Position
   ) {
-    const vueTemp = document.getText();
-    // 获取script标签的内容
-    const scriptContent = vueTemp.match(/<script>([\s\S]*)<\/script>/)?.[1];
-    if (!scriptContent) {
-      return;
+    document.uri;
+    const word = this.getSelectionWord(document, position);
+    const importModule = await this.getImportModule(document, word);
+    // 有.vue后缀的，vscode可以自动跳转
+    if (!importModule || importModule.value.endsWith(".vue")) {
+      return null;
     }
-    const selection = document.getWordRangeAtPosition(position);
-    const selectionWord = document.getText(selection);
-    // 横杆转驼峰
-    let world = selectionWord.replace(/-(\w)/g, function (all, letter) {
-      return letter.toUpperCase();
-    });
-    // 第一字母大写
-    world = world.slice(0, 1).toUpperCase() + world.slice(1);
-    const imports = [...(await parseImports(scriptContent))];
-    let targetImport = "";
-    for (const item of imports) {
-      const { importClause, moduleSpecifier } = item;
-      // 有一个和当前名字相同的，就可以跳转
-      const hasSameName =
-        importClause?.default === world ||
-        importClause?.named.some((i) => {
-          return i.specifier === world || i.binding === world;
-        });
-      if (hasSameName) {
-        if (moduleSpecifier.type === "package") {
-          targetImport = moduleSpecifier.value || moduleSpecifier.code;
-        }
-      }
-    }
-    // TODO: 换个方式获取tsconfig.json，暂时没找到
-    const tsconfig = await vscode.workspace
-      .openTextDocument(
-        vscode.workspace.workspaceFolders![0].uri.fsPath + "/tsconfig.json"
-      )
-      .then((document) => {
-        return document.getText();
-      });
-    if (!targetImport || !tsconfig) {
-      return;
-    }
-    // 读取tsconfig.json配置文件，获取别名配置
-    const tsconfigJson = JSON.parse(tsconfig);
-    const baseUrl = tsconfigJson?.compilerOptions?.baseUrl || "."; // Either absolute or relative path. If relative it's resolved to current working directory.
-    const paths = tsconfigJson?.compilerOptions?.paths || {};
-    const matchPath = createMatchPath(baseUrl, paths, undefined, false);
-    let exitPath = "";
-    matchPath(
-      targetImport,
-      undefined,
-      (d) => {
-        if (!d.endsWith(".vue")) {
-          return false;
-        }
-        const isExit = checkFileExists(
-          vscode.workspace.workspaceFolders![0].uri.fsPath + d
-        );
-        if (isExit) {
-          exitPath = d;
-        }
-        return isExit;
-      },
-      [".vue"]
-    );
-    return exitPath;
+    const res = await this.getMatchPath(document, importModule);
+    return res || "";
   }
 
   provideDefinition(
     document: vscode.TextDocument,
-    position: vscode.Position,
-    token: vscode.CancellationToken
+    position: vscode.Position
   ): vscode.ProviderResult<vscode.Definition | vscode.DefinitionLink[]> {
-    const selection = document.getWordRangeAtPosition(position);
     return this.findImportFromPath(document, position).then((res) => {
       let allPaths: vscode.Location[] = [];
       if (res) {
