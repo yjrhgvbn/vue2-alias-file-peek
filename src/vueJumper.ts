@@ -44,18 +44,22 @@ export default class VueJumper implements vscode.DefinitionProvider {
         templateEndLine = i;
       }
     }
-    // 检查选中左边的是不是<
-    const leftChar = document.getText(
-      new vscode.Range(
-        new vscode.Position(
-          selection.start.line,
-          selection.start.character - 1
-        ),
-        selection.start
-      )
-    );
-    if (leftChar !== "<") {
-      return null;
+    const isInTemplate =
+      position.line > templateStartLine && position.line < templateEndLine;
+    if (isInTemplate) {
+      // 检查选中左边的是不是<
+      const leftChar = document.getText(
+        new vscode.Range(
+          new vscode.Position(
+            selection.start.line,
+            selection.start.character - 1
+          ),
+          selection.start
+        )
+      );
+      if (leftChar !== "<") {
+        return null;
+      }
     }
 
     // 横杆转驼峰
@@ -185,6 +189,10 @@ export default class VueJumper implements vscode.DefinitionProvider {
     position: vscode.Position
   ): vscode.ProviderResult<vscode.Definition | vscode.DefinitionLink[]> {
     return this.findImportFromPath(document, position).then((res) => {
+      console.log(
+        "🚀 ~ file: vueJumper.ts:188 ~ VueJumper ~ returnthis.findImportFromPath ~ res:",
+        res
+      );
       let allPaths: vscode.Location[] = [];
       if (res) {
         allPaths.push(
