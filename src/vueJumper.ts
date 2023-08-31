@@ -3,6 +3,7 @@ import parseImports, { ModuleSpecifierType } from "parse-imports";
 import { createMatchPath } from "tsconfig-paths";
 import { accessSync, constants } from "fs";
 import { resolve, relative } from "path";
+import stripJsonComments from "strip-json-comments";
 
 function checkFileExists(filePath: string) {
   try {
@@ -98,7 +99,7 @@ export default class VueJumper implements vscode.DefinitionProvider {
   }
 
   async getAliasConfig(name: string) {
-    const workspacePath = vscode.workspace.workspaceFolders?.[0].uri.path;
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri?.path;
     if (!workspacePath) {
       return null;
     }
@@ -106,7 +107,13 @@ export default class VueJumper implements vscode.DefinitionProvider {
 
     const config = await vscode.workspace
       .openTextDocument(configPath)
-      .then((document) => JSON.parse(document.getText()));
+      .then((document) => {
+        try {
+          return JSON.parse(stripJsonComments(document.getText()));
+        } catch (e) {
+          return null;
+        }
+      });
     const baseUrl = config?.compilerOptions?.baseUrl;
     const paths = config?.compilerOptions?.paths;
     return { baseUrl, paths };
