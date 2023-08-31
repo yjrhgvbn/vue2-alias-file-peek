@@ -3,7 +3,7 @@
   "displayName": "vue2-file-peek",
   "description": "支持vue2跳转到vue文件",
   "repository": "https://github.com/yjrhgvbn/vue2-alias-file-peek",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "PalmPam",
   "icon": "icon.png",
   "engines": {
