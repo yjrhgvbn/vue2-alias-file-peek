@@ -25,6 +25,19 @@ export default class VueJumper implements vscode.DefinitionProvider {
   aliasConfigs: IAliasConfigsItem[] = [];
   constructor() {}
 
+  /** 转为驼峰 */
+  toHump(name: string | undefined) {
+    if (!name) {
+      return name;
+    }
+    let word = name.replace(/-(\w)/g, function (all, letter) {
+      return letter.toUpperCase();
+    });
+    // 第一字母大写
+    word = word.slice(0, 1).toUpperCase() + word.slice(1);
+    return name;
+  }
+
   getSelectionWord(document: vscode.TextDocument, position: vscode.Position) {
     const selection = document.getWordRangeAtPosition(position);
     if (!selection) {
@@ -63,13 +76,7 @@ export default class VueJumper implements vscode.DefinitionProvider {
       }
     }
 
-    // 横杆转驼峰
-    let word = selectionWord.replace(/-(\w)/g, function (all, letter) {
-      return letter.toUpperCase();
-    });
-    // 第一字母大写
-    word = word.slice(0, 1).toUpperCase() + word.slice(1);
-    return word;
+    return this.toHump(selectionWord);
   }
 
   async getImportModule(document: vscode.TextDocument, word: string) {
@@ -85,9 +92,11 @@ export default class VueJumper implements vscode.DefinitionProvider {
       const { importClause, moduleSpecifier } = item;
       // 有一个和当前名字相同的，就可以跳转
       const hasSameName =
-        importClause?.default === word ||
+        this.toHump(importClause?.default) === word ||
         importClause?.named.some((i) => {
-          return i.specifier === word || i.binding === word;
+          return (
+            this.toHump(i.specifier) === word || this.toHump(i.binding) === word
+          );
         });
       if (hasSameName) {
         return {
@@ -198,14 +207,14 @@ export default class VueJumper implements vscode.DefinitionProvider {
     return this.findImportFromPath(document, position).then((res) => {
       let allPaths: vscode.Location[] = [];
       if (res) {
-        allPaths.push(
+        allPaths = [
           new vscode.Location(
             vscode.Uri.file(
               vscode.workspace.workspaceFolders![0].uri.fsPath + res
             ),
             new vscode.Position(0, 0)
-          )
-        );
+          ),
+        ];
       }
       return allPaths;
     });
